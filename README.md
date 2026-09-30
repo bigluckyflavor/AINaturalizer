@@ -24,7 +24,8 @@ with a verified refusal rule.
 
 ## Honest limits
 
-- Evasion is demonstrated against DAAT's own 11 heuristic features.
+- The current target is DAAT's 10 implemented heuristic features.
   Transfer to independent detectors is **not** claimed — see DESIGN.md §5.
 - The perceptual dose model is uncalibrated; some operators are audibly
   a mastering-style change, not transparent processing.
+\n\n## Collaboration\n\nSee **[chats.md](chats.md)** for the shared Claude / Muse / ChatGPT / Gemini engineering log, current priorities, completed corrections, and bloat-removal notes.\n
