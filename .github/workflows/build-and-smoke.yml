@@ -61,12 +61,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $out = "tests\\refused.wav"
+          $out = "tests\refused.wav"
           Remove-Item $out -ErrorAction SilentlyContinue
 
           $proc = Start-Process `
-            -FilePath ".\\build\\Release\\naturalizer.exe" `
-            -ArgumentList @("tests\\ai_like.wav", $out, "--budget", "0") `
+            -FilePath ".\build\Release\naturalizer.exe" `
+            -ArgumentList @("tests\ai_like.wav", $out, "--budget", "0") `
             -NoNewWindow `
             -Wait `
             -PassThru
@@ -77,70 +77,3 @@ jobs:
           if (Test-Path $out) {
             throw "refused run created output"
           }
-
-on:
-  pull_request:
-  push:
-    branches: [ main ]
-
-jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-
-    defaults:
-      run:
-        working-directory: code
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install fixture dependency
-        run: python -m pip install numpy
-
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build --config Release -j 2
-
-      - name: Generate fixture
-        run: python tests/make_fixture.py tests/ai_like.wav
-
-      - name: Analyze fixture (Linux)
-        if: runner.os == 'Linux'
-        run: ./build/naturalizer analyze tests/ai_like.wav
-
-      - name: Analyze fixture (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: .\build\Release\naturalizer.exe analyze tests\ai_like.wav
-
-      - name: Refusal writes no output (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          rm -f tests/refused.wav
-          set +e
-          ./build/naturalizer tests/ai_like.wav tests/refused.wav --budget 0
-          status=$?
-          set -e
-          test "$status" -eq 2
-          test ! -e tests/refused.wav
-
-      - name: Refusal writes no output (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Remove-Item tests\refused.wav -ErrorAction SilentlyContinue
-          & .\build\Release\naturalizer.exe tests\ai_like.wav tests\refused.wav --budget 0
-          $status = $LASTEXITCODE
-          if ($status -ne 2) { throw "expected exit code 2, got $status" }
-          if (Test-Path tests\refused.wav) { throw "refused run created output" }
