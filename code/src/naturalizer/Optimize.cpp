@@ -1,7 +1,56 @@
 #include "Optimize.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
+
+namespace
+{
+    struct SampleSafety
+    {
+        bool finite = true;
+        double peak = 0.0;
+    };
+
+    SampleSafety inspectSamples (const juce::AudioBuffer<float>& buffer)
+    {
+        SampleSafety s;
+        for (int c = 0; c < buffer.getNumChannels(); ++c)
+        {
+            const float* d = buffer.getReadPointer (c);
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                const double v = d[i];
+                if (! std::isfinite (v))
+                {
+                    s.finite = false;
+                    return s;
+                }
+                s.peak = std::max (s.peak, std::abs (v));
+            }
+        }
+        return s;
+    }
+
+    bool hasFeatureRegression (const AnalysisOutcome& before,
+                               const AnalysisOutcome& after,
+                               double maxIncrease)
+    {
+        std::unordered_map<std::string, double> baseline;
+        baseline.reserve (before.features.size());
+        for (const auto& f : before.features)
+            baseline[f.id] = f.suspicion;
+
+        for (const auto& f : after.features)
+        {
+            const auto it = baseline.find (f.id);
+            if (it != baseline.end() && f.suspicion - it->second > maxIncrease + 1.0e-9)
+                return true;
+        }
+        return false;
+    }
+}
 
 Optimizer::Optimizer (Oracle& o, double sr, OptimizeConfig cfg)
     : oracle (o), sampleRate (sr), config (std::move (cfg)), ops (makeOperators (sr))
@@ -14,9 +63,23 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
     juce::AudioBuffer<float> original;
     original.makeCopyOf (buffer);
 
-    result.likelihoodBefore = oracle.score (buffer, sampleRate);
-    double current = result.likelihoodBefore;
+    auto currentOutcome = oracle.analyze (buffer, sampleRate);
+    result.likelihoodBefore = currentOutcome.likelihood;
+
+    if (! currentOutcome.scorable)
+    {
+        result.refused = true;
+        result.refuseReason = "input is not scorable by the DAAT factory profile";
+        result.likelihoodAfter = currentOutcome.likelihood;
+        result.confidenceAfter = currentOutcome.confidence;
+        return result;
+    }
+
+    double current = currentOutcome.likelihood;
     double budgetLeft = config.budget;
+
+    const auto originalSafety = inspectSamples (buffer);
+    const double allowedPeak = std::max (0.999, originalSafety.peak + 1.0e-6);
 
     std::printf ("iter  op                    strength   dose    likelihood\n");
     std::printf ("----  --------------------  --------   ----    ----------\n");
@@ -29,10 +92,6 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
             break;
         }
 
-        // Sweep every (operator, strength) on a scratch copy.
-        // Each candidate gets a deterministic RNG stream derived from
-        // (seed, iteration, op, strength), so the winning move can be
-        // re-applied to the real buffer bit-identically afterward.
         auto candidateRng = [&] (const std::string& opId, double s)
         {
             std::size_t h = std::hash<std::string>{} (opId);
@@ -43,6 +102,7 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
 
         const PerturbOp* bestOp = nullptr;
         double bestStrength = 0.0, bestScore = current, bestDose = 0.0;
+        AnalysisOutcome bestOutcome;
 
         for (const auto& op : ops)
         {
@@ -50,20 +110,32 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
             {
                 const double dose = s * op.costPerUnit;
                 if (dose > budgetLeft + 1e-9)
-                    continue; // cannot afford this move
+                    continue;
 
                 juce::AudioBuffer<float> trial;
                 trial.makeCopyOf (buffer);
                 auto trialRng = candidateRng (op.id, s);
                 op.apply (trial, s, trialRng);
-                const double l = oracle.score (trial, sampleRate);
 
-                if (l < bestScore)
+                const auto safety = inspectSamples (trial);
+                if (! safety.finite || safety.peak > allowedPeak)
+                    continue;
+
+                const auto trialOutcome = oracle.analyze (trial, sampleRate);
+                if (! trialOutcome.scorable)
+                    continue;
+
+                if (hasFeatureRegression (currentOutcome, trialOutcome,
+                                          config.maxFeatureRegression))
+                    continue;
+
+                if (trialOutcome.likelihood < bestScore)
                 {
-                    bestScore = l;
+                    bestScore = trialOutcome.likelihood;
                     bestOp = &op;
                     bestStrength = s;
                     bestDose = dose;
+                    bestOutcome = trialOutcome;
                 }
             }
         }
@@ -73,7 +145,7 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
         {
             result.refused = true;
             result.refuseReason = (bestOp == nullptr)
-                ? "no candidate fit the remaining perceptual budget"
+                ? "no safe candidate fit the remaining budget and interaction guard"
                 : "no candidate improved likelihood beyond the acceptance floor";
             break;
         }
@@ -93,6 +165,8 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
         result.steps.push_back (std::move (step));
 
         current = bestScore;
+        currentOutcome = std::move (bestOutcome);
+
         std::printf ("%4d  %-20s  %8.2f   %4.2f    %.4f\n",
                      iter + 1, bestOp->id.c_str(), bestStrength, bestDose, current);
         std::fflush (stdout);
@@ -107,9 +181,8 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
     }
 
     result.likelihoodAfter = current;
-    result.confidenceAfter = oracle.analyze (buffer, sampleRate).confidence;
+    result.confidenceAfter = currentOutcome.confidence;
 
-    // Delta metrics vs the original.
     double peakDelta = 0.0, sumSq = 0.0;
     long n = 0;
     const int chans = std::min (buffer.getNumChannels(), original.getNumChannels());
