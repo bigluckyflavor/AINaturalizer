@@ -94,3 +94,22 @@ Additional parity review caught two edge cases after the first correction:
 A Windows/Linux GitHub Actions smoke workflow was also added. It builds the CLI, generates the fixture, runs analysis, and verifies that a forced refusal returns exit code 2 without creating an output WAV.
 
 **Still required before merging performance claims:** direct oracle-vs-production-DAAT equivalence tests. Build smoke is necessary but not sufficient.
+
+### 2026-09-29 — Muse
+
+**Review of the audit branch.** Read the full diff of `Oracle.cpp`, `Oracle.h`, `main.cpp`, and `Optimize.cpp` against the vendored DAAT sources. Findings:
+
+- Confirmed all four oracle divergences were real in the original prototype: medium-scale-only windows, confidence-weighted suspicion averaging, linear resampling, and missing confidence context (clip flag, RMS, minimum analyzed seconds). Consequence: the published fixture numbers (0.568 → 0.277 → 0.120) measured the prototype's own incorrect oracle, not DAAT. They are historical only and must not be cited as evasion evidence. That was my error; the audit is correct.
+- Confirmed the refusal-output bug: the original CLI wrote the output WAV and then reported refusal, which voids the refusal guarantee. "Refused runs write no output" is the correct semantics.
+- The corrections match DAAT's production path as vendored: three scales with profile windows/overlaps and scale masks, registry-order arithmetic-mean aggregation, Lagrange resampling with DAAT's ratio convention, 2-channel clamp, full confidence context, verdict reporting. The interaction guard (no accepted move may raise another tracked feature's suspicion by more than 0.10) and non-finite/new-clipping rejection are sound additions.
+- Agree with the standing caution: mirrored logic is still mirrored logic. The direct equivalence harness (P0) is the right next step before any new numbers are published. No new features until it passes.
+
+**Product/UX semantics for Unscorable / Inconclusive / Target reached / Refusal** (per the request to Muse):
+
+- *Unscorable* is a measurement failure, not a verdict. Report the reason (duration below minimum, empty or non-finite input), show no likelihood number beside it, exit non-zero, write nothing. A number next to "Unscorable" invites misreading.
+- *Inconclusive* must never read as success. Always display likelihood + confidence + verdict together (e.g. "likelihood 0.21 · confidence 0.34 · verdict Inconclusive — target NOT reached"), and keep the optimizer's Unlikely-verdict gate. A bare "0.21" in success styling is a lie the UI would be telling.
+- *Target reached* is evasion of one instrument's threshold, not a provenance claim. Required phrasing pattern: "target reached: likelihood X < 0.28, DAAT verdict Unlikely (mirrored oracle)". Banned phrasing: "sounds human", "passes as human", "undetectable", "detector-proof". This tool is adversarial; its output language must not become a false certificate of human authorship.
+- *Refusal* is the guardrail working, not a crash. Requirements: exit code 2, no output file created, any existing file at the output path left untouched, message states budget used/available and why no candidate fit. Frame as designed behavior with a next step (raise `--budget`, lower `--target`), and keep refusals deterministic for a given input/seed/budget so "guardrail fired" is distinguishable from "tool broke".
+- Keep `analyze` output visually distinct from `optimize` output: analyze is the reference instrument speaking; optimize is the adversary speaking. They should not share success styling.
+
+**Open:** branch is not merged to main. Leaving that decision to Christopher.
