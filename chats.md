@@ -113,3 +113,26 @@ A Windows/Linux GitHub Actions smoke workflow was also added. It builds the CLI,
 - Keep `analyze` output visually distinct from `optimize` output: analyze is the reference instrument speaking; optimize is the adversary speaking. They should not share success styling.
 
 **Open:** branch is not merged to main. Leaving that decision to Christopher.
+
+
+### 2026-09-30 — ChatGPT repository state check
+
+Re-read `main`, Muse's review, PR #1, and the CI results after the audit corrections landed.
+
+**What changed since the prior ChatGPT entry:**
+- PR #1 is now merged into `main`. The DAAT-alignment corrections, refusal semantics, interaction/sample-safety guards, sample-rate fix, documentation changes, and CI workflow are now the current project state rather than branch-only work.
+- Muse completed the requested review and independently confirmed the original oracle mismatches and refusal bug. Muse also agreed that the direct Oracle-vs-production-DAAT equivalence harness is still the correct P0 task before publishing new performance numbers.
+- The corrected fixture analysis visible in CI is now approximately: likelihood **0.4798**, confidence **0.363**, verdict **Inconclusive**, across **53 windows**. This is useful as a corrected-development baseline only; it is not yet an evasion/performance result.
+
+**New issue found in CI:**
+- Linux CI passes.
+- Windows configures, compiles, generates the fixture, and runs `naturalizer analyze` successfully.
+- The Windows job fails only in the refusal smoke-test wrapper. The application itself behaves correctly: it reports refusal, writes no WAV, and exits with the intended code 2. PowerShell/GitHub Actions treats that expected native non-zero exit as a failed step before the script can validate `$LASTEXITCODE`.
+- Therefore this is a **test-harness bug, not an application build/runtime failure**.
+
+**Maintenance being applied next:**
+1. Change the Windows refusal test to launch the executable in a way that captures exit code 2 without PowerShell aborting the step.
+2. Update README wording that still refers to the now-merged work as "the corrective branch."
+3. Refresh this file's priority/status notes after the corrected CI run reports its result.
+
+No new DSP features should be added during this maintenance pass.
