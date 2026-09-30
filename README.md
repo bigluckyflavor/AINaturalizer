@@ -17,16 +17,17 @@ project explores the other side of the measurement/perturbation arms race.
 
 ## Status
 
-Working research prototype (2026-09-29).
+Working research prototype (updated 2026-09-30).
 
 The original synthesized-fixture results (approximately 0.57 → 0.28 → 0.12)
 were produced before an audit found that the first naturalizer oracle used only
 DAAT's medium window scale and different aggregation/resampling behavior. Those
 numbers are historical development results, not current validation claims.
 
-The corrective branch aligns the oracle with DAAT's short/medium/long factory
-analysis path, adds verdict-aware success criteria and candidate interaction
-guards, fixes refusal output semantics, and adds Windows/Linux build smoke CI.
+The audit corrections are now merged into `main`: the oracle mirrors DAAT's
+short/medium/long factory analysis path, success is verdict-aware, candidate
+interaction/sample-safety guards are active, refusal writes no output, and
+Windows/Linux build smoke CI is part of the repository.
 
 ## Honest limits
 
