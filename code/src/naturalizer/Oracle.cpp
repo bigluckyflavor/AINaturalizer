@@ -23,16 +23,20 @@ namespace
         if (sourceRate <= 0.0 || analysisRate <= 0.0
             || std::abs (sourceRate - analysisRate) < 1.0e-9)
         {
-            copy.makeCopyOf (in);
+            const int channels = juce::jlimit (1, 2, in.getNumChannels());
+            copy.setSize (channels, in.getNumSamples());
+            for (int c = 0; c < channels; ++c)
+                copy.copyFrom (c, 0, in, c, 0, in.getNumSamples());
             return copy;
         }
 
         const double ratio = sourceRate / analysisRate; // DAAT: input consumed per output sample
         const int outLen = juce::jmax (1, (int) std::floor ((double) in.getNumSamples() / ratio));
-        copy.setSize (in.getNumChannels(), outLen, false, false, true);
+        const int channels = juce::jlimit (1, 2, in.getNumChannels());
+        copy.setSize (channels, outLen, false, false, true);
         copy.clear();
 
-        for (int c = 0; c < in.getNumChannels(); ++c)
+        for (int c = 0; c < channels; ++c)
         {
             juce::LagrangeInterpolator interp;
             interp.reset();
@@ -63,12 +67,12 @@ public:
     {
         AnalysisOutcome out;
         const int numSamples = buffer.getNumSamples();
-        const int numChannels = buffer.getNumChannels();
-        if (numSamples <= 0 || numChannels <= 0 || sourceRate <= 0.0)
+        if (numSamples <= 0 || buffer.getNumChannels() <= 0 || sourceRate <= 0.0)
             return out;
 
         const double analysisRate = profile.analysis.sampleRate;
         auto audio = resampleLikeDaat (buffer, sourceRate, analysisRate);
+        const int numChannels = audio.getNumChannels();
         if (audio.getNumSamples() <= 0)
             return out;
 
