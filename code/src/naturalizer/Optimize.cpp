@@ -37,18 +37,27 @@ namespace
                                const AnalysisOutcome& after,
                                double maxIncrease)
     {
-        std::unordered_map<std::string, double> baseline;
-        baseline.reserve (before.features.size());
-        for (const auto& f : before.features)
-            baseline[f.id] = f.suspicion;
-
+        std::unordered_map<std::string, double> candidate;
+        candidate.reserve (after.features.size());
         for (const auto& f : after.features)
+            candidate[f.id] = f.suspicion;
+
+        for (const auto& f : before.features)
         {
-            const auto it = baseline.find (f.id);
-            if (it != baseline.end() && f.suspicion - it->second > maxIncrease + 1.0e-9)
+            const auto it = candidate.find (f.id);
+            if (it == candidate.end())
+                return true; // losing evidence is not a valid "improvement"
+            if (it->second - f.suspicion > maxIncrease + 1.0e-9)
                 return true;
         }
         return false;
+    }
+
+    bool targetReached (const AnalysisOutcome& outcome, double targetLikelihood)
+    {
+        return outcome.scorable
+            && outcome.likelihood <= targetLikelihood
+            && outcome.verdict == "Unlikely";
     }
 }
 
@@ -86,7 +95,7 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
 
     for (int iter = 0; iter < config.maxIters; ++iter)
     {
-        if (current <= config.targetLikelihood)
+        if (targetReached (currentOutcome, config.targetLikelihood)
         {
             result.reachedTarget = true;
             break;
@@ -172,7 +181,7 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
         std::fflush (stdout);
     }
 
-    if (current <= config.targetLikelihood)
+    if (targetReached (currentOutcome, config.targetLikelihood)
         result.reachedTarget = true;
     else if (! result.refused)
     {
