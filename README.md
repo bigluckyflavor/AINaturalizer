@@ -1,30 +1,46 @@
 # AINaturalizer
 
-An offline batch tool that modifies AI-generated music so heuristic
-AI-audio detectors score it as human-made.
+An offline batch research tool that modifies AI-generated music so DAAT's
+implemented heuristic feature set produces a lower synthetic-likelihood score.
 
-This is the adversarial counterpart to the DAAT AI Audio Inspector, kept
-as a **separate project on purpose** — DAAT stays an honest forensics
-instrument; this tool explores the other side of the arms race.
+This is the adversarial counterpart to the DAAT AI Audio Inspector, kept as a
+**separate project on purpose** — DAAT remains the forensics instrument; this
+project explores the other side of the measurement/perturbation arms race.
 
-- **[DESIGN.md](DESIGN.md)** — full design: threat model, per-feature
-  counter-perturbation map, optimizer, perceptual budget, refusal rule,
-  and the 4-part evaluation protocol.
-- **[code/](code/)** — C++17 prototype. Vendors DAAT's real feature
-  extractor + 11 feature evaluators + detection engine as the measurement
-  oracle (the loss function), then runs greedy coordinate descent over 8
-  perturbation operators. See [code/README.md](code/README.md) for build
-  instructions and verified results.
+- **[DESIGN.md](DESIGN.md)** — threat model, feature-to-perturbation map,
+  optimizer target, perceptual guard design, refusal rule, and evaluation protocol.
+- **[code/](code/)** — C++17 prototype. Vendors DAAT's measurement sources and
+  mirrors the factory three-scale scoring path, then runs greedy coordinate
+  descent over 8 perturbation operators.
+- **[chats.md](chats.md)** — shared Claude / Muse / ChatGPT / Gemini engineering
+  log: current priorities, completed work, review requests, and bloat-removal notes.
 
 ## Status
 
-Working prototype (2026-09-29). On a synthesized AI-like fixture:
-likelihood 0.57 → 0.28 (1 step) → 0.12 (3 steps), deterministic,
-with a verified refusal rule.
+Working research prototype (2026-09-29).
+
+The original synthesized-fixture results (approximately 0.57 → 0.28 → 0.12)
+were produced before an audit found that the first naturalizer oracle used only
+DAAT's medium window scale and different aggregation/resampling behavior. Those
+numbers are historical development results, not current validation claims.
+
+The corrective branch aligns the oracle with DAAT's short/medium/long factory
+analysis path, adds verdict-aware success criteria and candidate interaction
+guards, fixes refusal output semantics, and adds Windows/Linux build smoke CI.
 
 ## Honest limits
 
-- Evasion is demonstrated against DAAT's own 11 heuristic features.
-  Transfer to independent detectors is **not** claimed — see DESIGN.md §5.
-- The perceptual dose model is uncalibrated; some operators are audibly
-  a mastering-style change, not transparent processing.
+- DAAT currently has **10 implemented heuristic features** in this vendored
+  measurement path. Vocal, fingerprint, and model groups are architectural
+  placeholders rather than implemented evidence sources.
+- A direct automated equivalence harness against DAAT's production
+  `AnalysisEngine` is still required before new self-evasion numbers should be
+  published.
+- Transfer to independent detectors is **not** claimed.
+- The perceptual dose model remains uncalibrated. It is a search heuristic, not
+  proof that processing is transparent or perceptually safe.
+- Some perturbations can be audible mastering-style changes; objective and human
+  validation remain part of the release criteria.
+
+See [code/README.md](code/README.md) for build/run details and current technical
+limitations.

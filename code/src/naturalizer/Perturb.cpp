@@ -236,7 +236,7 @@ std::vector<PerturbOp> makeOperators (double sampleRate)
     // amplitudes so they are not suspiciously uniform.
     ops.push_back ({
         "transientHumanize", "Transient Variation", "transientVariance", 1.0,
-        [] (juce::AudioBuffer<float>& b, double s, std::mt19937_64& rng)
+        [sampleRate] (juce::AudioBuffer<float>& b, double s, std::mt19937_64& rng)
         {
             if (s <= 0.0) return;
             const int n = b.getNumSamples();
@@ -263,7 +263,7 @@ std::vector<PerturbOp> makeOperators (double sampleRate)
             const double thr = mean + 2.5 * sd;
 
             std::uniform_real_distribution<double> ugain (-1.0, 1.0);
-            const int minGap = (int) (0.10 * 48000.0 / hop); // 100 ms between onsets
+            const int minGap = (int) (0.10 * sampleRate / hop); // 100 ms between onsets
             int lastOnset = -minGap * 2, onsets = 0;
 
             for (size_t k = 0; k < flux.size() && onsets < 400; ++k)
@@ -272,9 +272,9 @@ std::vector<PerturbOp> makeOperators (double sampleRate)
                 lastOnset = (int) k; ++onsets;
 
                 const int center = (int) k * hop + frame / 2;
-                const int half = (int) (0.040 * 48000.0); // ±40 ms region
+                const int half = (int) (0.040 * sampleRate); // ±40 ms region
                 const double g = 1.0 + s * 0.30 * ugain (rng);
-                const int ramp = (int) (0.010 * 48000.0);
+                const int ramp = (int) (0.010 * sampleRate);
                 for (int i = -half; i <= half; ++i)
                 {
                     const int idx = center + i;

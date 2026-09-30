@@ -1,7 +1,7 @@
 # AI Music Naturalizer — Design Document
 
 **Date:** 2026-09-29
-**Status:** Design / pre-implementation
+**Status:** Research prototype + design target
 **Relationship to DAAT:** Sibling project, deliberately separate. DAAT (the detector in
 `bigluckyflavor/AIDetect`) stays an honest forensics instrument. This tool does the inverse:
 it modifies AI-generated audio so its measurable characteristics fall inside human-typical
@@ -19,7 +19,7 @@ A plugin version can come later once the perturbation set is proven.
 
 ## 2. Honest caveats (read first)
 
-- **It overfits to DAAT's 11 features.** This tool guarantees evasion of the DAAT
+- **It overfits to DAAT's 10 currently implemented heuristic features.** This tool guarantees evasion of the DAAT
   feature set, not of arbitrary detectors. Transfer to other systems is unmeasured and
   should be tested, not assumed.
 - **Arms race.** Every perturbation is a signature. If detectors adapt, this tool's
@@ -76,7 +76,7 @@ is what the detector flags; "counter-move" is the naturalizer's response.
 | 8 | `midSideRatio` | outside 0.02–1.4 | M/S rebalance EQ toward the profile's mid-range | ≤2 dB M/S correction |
 | 9 | `noiseFloorStationarity` | > 0.82 (frozen noise floor) | Replace/augment the floor with slowly drifting room tone: shaped noise with wandering level (±2 dB over 10–30 s) and wandering spectrum | Floor stays ≥ 12 dB below program at all times |
 | 10 | `microRepetition` | > 0.76 (looped / exact repeats) | Break exact repetition: alternate loop iterations with micro pitch/time jitter (±4 cents, ±0.3 ms), subtle per-iteration EQ variation | Jitter below pitch/time perception thresholds |
-| 11 | (vocal/fingerprint/model groups) | *not implemented in DAAT* | **Nothing to do** — but note: a detector with a real vocal or fingerprint group would likely catch everything above. This is the transfer-risk in concrete form. | — |
+| — | (vocal/fingerprint/model groups) | *not implemented in DAAT* | **Nothing to do yet** — these are architectural placeholders rather than implemented features. | — |
 
 Two features deserve emphasis:
 - **`noiseFloorStationarity` and `microRepetition` are the highest-leverage targets.**
@@ -103,7 +103,7 @@ loss — the attacker gets the defender's exact test suite:
    threshold, output nothing and report which features could not be moved. Never
    ship audible damage to hit a number.
 
-Complexity is manageable: 11 features, each evaluated on windowed FFTs. A 3-minute
+Complexity is manageable: 10 implemented features, each evaluated on windowed FFTs. A 3-minute
 stereo file at 3 scales is seconds per analysis pass on a modern CPU; a full
 optimization run should be under 2–3 minutes. Profile the `FeatureExtractor` first —
 if it's the bottleneck, cache per-window raw features and only recompute windows
@@ -157,3 +157,24 @@ Each `Perturbation` declares hard limits (the right column of the §4 table). On
 - DAAT consumed as a git submodule or vendored static lib — single source of truth
   for the feature definitions, so the naturalizer can never silently drift from the
   detector it's measured against.
+
+
+## 10. Implementation status note (2026-09-29 audit correction)
+
+The initial prototype implemented the optimization loop before proving exact
+oracle equivalence. That ordering exposed an important mismatch: the first
+oracle used only medium windows and a different aggregation/resampling path.
+
+The corrective branch `audit-corrections-2026-09-29` brings the oracle in line
+with DAAT's three-scale factory-profile path, adds interaction/sample-safety
+guards, fixes sample-rate-dependent transient timing, and enforces the refusal
+contract by writing no output on failure.
+
+This does **not** complete Phase 1. Phase 1 is complete only when an automated
+equivalence harness runs the same untouched material through the naturalizer
+oracle and DAAT's production analysis path and verifies likelihood, confidence,
+feature values, group values, and verdict within explicit tolerances.
+
+The current numeric dose remains a search heuristic. The hard perceptual guard
+described in §6 is still future work and must not be implied by the CLI merely
+because a candidate fits the dose budget.

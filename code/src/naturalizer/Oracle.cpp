@@ -12,113 +12,161 @@
 
 namespace
 {
-    constexpr double kAnalysisRate = 48000.0;
-    constexpr double kWindowSeconds = 8.0;   // medium scale, like DAAT's default
-    constexpr double kOverlap = 0.5;
-
-    /** Linear-interpolation resample to the analysis rate. Bit-transparent
-        when the source already matches. */
-    juce::AudioBuffer<float> resampleToAnalysisRate (const juce::AudioBuffer<float>& in,
-                                                     double sourceRate)
+    juce::AudioBuffer<float> resampleLikeDaat (const juce::AudioBuffer<float>& in,
+                                               double sourceRate,
+                                               double analysisRate)
     {
-        if (std::abs (sourceRate - kAnalysisRate) < 1.0 || in.getNumSamples() == 0)
+        juce::AudioBuffer<float> copy;
+        if (in.getNumSamples() <= 0 || in.getNumChannels() <= 0)
+            return copy;
+
+        if (sourceRate <= 0.0 || analysisRate <= 0.0
+            || std::abs (sourceRate - analysisRate) < 1.0e-9)
         {
-            juce::AudioBuffer<float> copy;
-            copy.makeCopyOf (in);
+            const int channels = juce::jlimit (1, 2, in.getNumChannels());
+            copy.setSize (channels, in.getNumSamples());
+            for (int c = 0; c < channels; ++c)
+                copy.copyFrom (c, 0, in, c, 0, in.getNumSamples());
             return copy;
         }
 
-        const double ratio = kAnalysisRate / sourceRate;
-        const int outLen = (int) std::ceil (in.getNumSamples() * ratio);
-        const int ch = in.getNumChannels();
+        const double ratio = sourceRate / analysisRate; // DAAT: input consumed per output sample
+        const int outLen = juce::jmax (1, (int) std::floor ((double) in.getNumSamples() / ratio));
+        const int channels = juce::jlimit (1, 2, in.getNumChannels());
+        copy.setSize (channels, outLen, false, false, true);
+        copy.clear();
 
-        juce::AudioBuffer<float> out (ch, outLen);
-        for (int c = 0; c < ch; ++c)
+        for (int c = 0; c < channels; ++c)
         {
-            const float* src = in.getReadPointer (c);
-            float* dst = out.getWritePointer (c);
-            const int inLen = in.getNumSamples();
-            for (int n = 0; n < outLen; ++n)
-            {
-                const double pos = n / ratio;
-                const int i0 = (int) pos;
-                const int i1 = std::min (i0 + 1, inLen - 1);
-                const double frac = pos - i0;
-                dst[n] = (float) (src[i0] * (1.0 - frac) + src[i1] * frac);
-            }
+            juce::LagrangeInterpolator interp;
+            interp.reset();
+            interp.process (ratio, in.getReadPointer (c), copy.getWritePointer (c), outLen);
         }
-        return out;
+        return copy;
+    }
+
+    const char* verdictName (Verdict v)
+    {
+        switch (v)
+        {
+            case Verdict::Likely:            return "Likely";
+            case Verdict::Unlikely:          return "Unlikely";
+            case Verdict::Inconclusive:      return "Inconclusive";
+            case Verdict::InsufficientAudio: return "InsufficientAudio";
+        }
+        return "Inconclusive";
     }
 } // namespace
 
 class Oracle::Impl
 {
 public:
-    Impl()
-        : profile (DetectionProfile::getFactoryDefault())
-    {
-    }
+    Impl() : profile (DetectionProfile::getFactoryDefault()) {}
 
-    AnalysisOutcome analyze (const juce::AudioBuffer<float>& buffer, double sampleRate)
+    AnalysisOutcome analyze (const juce::AudioBuffer<float>& buffer, double sourceRate)
     {
         AnalysisOutcome out;
         const int numSamples = buffer.getNumSamples();
-        const int numChannels = buffer.getNumChannels();
-        if (numSamples <= 0 || numChannels <= 0)
+        if (numSamples <= 0 || buffer.getNumChannels() <= 0 || sourceRate <= 0.0)
             return out;
 
-        juce::AudioBuffer<float> audio = resampleToAnalysisRate (buffer, sampleRate);
+        const double analysisRate = profile.analysis.sampleRate;
+        auto audio = resampleLikeDaat (buffer, sourceRate, analysisRate);
+        const int numChannels = audio.getNumChannels();
+        if (audio.getNumSamples() <= 0)
+            return out;
+
+        const double analyzedSeconds = (double) audio.getNumSamples() / analysisRate;
+        if (analyzedSeconds < profile.analysis.minimumAnalyzedSeconds)
+        {
+            out.verdict = "InsufficientAudio";
+            return out;
+        }
 
         FeatureExtractor extractor;
         FeatureExtractor::Settings xs;
+        xs.hfCutoffHz         = profile.hfCutoffHz();
+        xs.repetitionMinLagMs = profile.repetitionMinLagMs();
+        xs.repetitionMaxLagMs = profile.repetitionMaxLagMs();
+
         if (! extractor.prepare (profile.analysis.fftSize,
                                  profile.analysis.hopSize,
-                                 kAnalysisRate, xs))
+                                 analysisRate,
+                                 xs))
             return out;
 
-        const auto windows = FeatureExtractor::planWindows (
-            audio.getNumSamples(), kAnalysisRate, kWindowSeconds, kOverlap);
-
-        struct Acc { double suspW = 0.0, conf = 0.0, weight = 0.0; int n = 0; };
+        struct Acc
+        {
+            double raw = 0.0;
+            double suspicion = 0.0;
+            double confidence = 0.0;
+            float weight = 0.0f;
+            int n = 0;
+        };
         std::map<juce::String, Acc> acc;
 
-        for (const auto& [start, length] : windows)
+        auto analyzeScale = [&] (AnalysisScale scale, double windowSeconds, double overlap)
         {
-            const WindowRawFeatures raw =
-                extractor.analyzeWindow (audio, start, length, numChannels);
+            const auto windows = FeatureExtractor::planWindows (
+                audio.getNumSamples(), analysisRate, windowSeconds, overlap);
+            const auto mask = daat::features::scaleBit (scale);
 
-            const auto feats = daat::features::evaluateWindow (
-                raw, profile, numChannels, ScaleMask::mediumWindows);
-
-            for (const auto& f : feats)
+            for (const auto& [start, length] : windows)
             {
-                if (! f.valid)
-                    continue;
-                Acc& a = acc[f.featureId];
-                a.suspW  += (double) f.suspicionScore * (double) f.confidence;
-                a.conf   += (double) f.confidence;
-                a.weight += (double) f.effectiveWeight;
-                a.n++;
-            }
-        }
+                const auto raw = extractor.analyzeWindow (audio, start, length, numChannels);
+                const auto feats = daat::features::evaluateWindow (
+                    raw, profile, numChannels, mask);
 
-        out.numWindows = (int) windows.size();
+                ++out.numWindows;
+                for (const auto& f : feats)
+                {
+                    if (! f.valid)
+                        continue;
+
+                    auto& a = acc[f.featureId];
+                    a.raw        += f.rawValue;
+                    a.suspicion  += f.suspicionScore;
+                    a.confidence += f.confidence;
+                    a.weight      = f.effectiveWeight;
+                    ++a.n;
+                }
+            }
+        };
+
+        analyzeScale (AnalysisScale::shortScale,
+                      profile.analysis.shortWindowSeconds,
+                      profile.analysis.shortOverlap);
+        analyzeScale (AnalysisScale::mediumScale,
+                      profile.analysis.mediumWindowSeconds,
+                      profile.analysis.mediumOverlap);
+        analyzeScale (AnalysisScale::longScale,
+                      profile.analysis.longWindowSeconds,
+                      profile.analysis.longOverlap);
 
         std::vector<FeatureResult> aggregate;
         aggregate.reserve (acc.size());
-        for (const auto& [id, a] : acc)
+
+        // Match DAAT AnalysisEngine::finalizeResult: registry order, arithmetic
+        // mean over applicable windows, and the effective weight from scoring.
+        for (const auto& desc : getFeatureRegistry())
         {
+            const auto it = acc.find (desc.id);
+            if (it == acc.end() || it->second.n == 0)
+                continue;
+
+            const auto& a = it->second;
             FeatureResult r;
-            r.featureId       = id;
-            r.valid           = a.n > 0;
-            r.suspicionScore  = a.conf > 1e-9 ? (float) (a.suspW / a.conf) : 0.0f;
+            r.featureId       = desc.id;
+            r.valid           = true;
+            r.rawValue        = (float) (a.raw / a.n);
+            r.suspicionScore  = (float) (a.suspicion / a.n);
             r.normalizedValue = r.suspicionScore;
-            r.confidence      = a.n > 0 ? (float) (a.conf / a.n) : 0.0f;
-            r.effectiveWeight = a.n > 0 ? (float) (a.weight / a.n) : 0.0f;
+            r.confidence      = (float) (a.confidence / a.n);
+            r.effectiveWeight = a.weight;
             aggregate.push_back (r);
 
             FeatureScore fs;
-            fs.id         = id.toStdString();
+            fs.id         = desc.id.toStdString();
             fs.suspicion  = r.suspicionScore;
             fs.confidence = r.confidence;
             fs.weight     = r.effectiveWeight;
@@ -126,18 +174,43 @@ public:
             out.features.push_back (std::move (fs));
         }
 
-        daat::detect::RuntimeControls controls; // factory-neutral: sensitivity 0.5
+        daat::detect::RuntimeControls controls;
         const auto groups = daat::detect::computeGroupScores (aggregate, profile, controls);
         const auto overall = daat::detect::combineGroups (groups, profile, controls);
 
+        float peak = 0.0f;
+        double sumSq = 0.0;
+        juce::int64 clippedSamples = 0;
+        for (int c = 0; c < numChannels; ++c)
+        {
+            const float* d = audio.getReadPointer (c);
+            for (int i = 0; i < audio.getNumSamples(); ++i)
+            {
+                const float a = std::abs (d[i]);
+                peak = juce::jmax (peak, a);
+                sumSq += (double) d[i] * (double) d[i];
+                if (a >= 0.999f)
+                    ++clippedSamples;
+            }
+        }
+
+        const double denom = (double) audio.getNumSamples() * (double) numChannels;
+        const double rms = denom > 0.0 ? std::sqrt (sumSq / denom) : 0.0;
+
         daat::detect::ConfidenceContext ctx;
-        ctx.analyzedSeconds  = audio.getNumSamples() / kAnalysisRate;
+        ctx.analyzedSeconds  = analyzedSeconds;
+        ctx.minimumSeconds   = profile.analysis.minimumAnalyzedSeconds;
         ctx.numWindows       = out.numWindows;
         ctx.channels         = numChannels;
-        ctx.sourceSampleRate = kAnalysisRate;
-        out.confidence = daat::detect::computeConfidence (overall, groups, profile, ctx);
+        ctx.clipped          = clippedSamples > (juce::int64) (denom * 0.0001);
+        ctx.rmsDb            = (float) juce::Decibels::gainToDecibels (rms, -100.0);
+        ctx.sourceSampleRate = sourceRate;
 
+        out.scorable = overall.scorable;
         out.likelihood = overall.scorable ? (double) overall.likelihood : 0.0;
+        out.confidence = daat::detect::computeConfidence (overall, groups, profile, ctx);
+        out.verdict = verdictName (
+            daat::detect::decideVerdict (overall, (float) out.confidence, profile, controls));
 
         for (const auto& g : groups)
         {

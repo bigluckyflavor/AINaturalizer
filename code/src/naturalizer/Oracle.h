@@ -9,21 +9,20 @@
 /**
     Measurement oracle for the naturalizer.
 
-    Drives DAAT's real analysis pipeline — FeatureExtractor (windowed FFT
-    measurements) -> feature evaluators (per-window suspicion scores) ->
-    DetectionEngine (group combination) — over a whole audio file and returns
-    the aggregate AI-likelihood plus the per-feature suspicion table.
+    Mirrors DAAT's scoring path: the same factory profile, analysis sample rate,
+    three window scales, per-feature scale masks, feature aggregation, group
+    combination, confidence context, and verdict logic.
 
-    The optimizer treats `likelihood` as the loss to minimize. Because this is
-    DAAT's own code, the loop provably converges against DAAT; transfer to
-    independent detectors is a separate, explicitly measured question.
+    The optimizer treats likelihood as the scalar loss, but callers can also
+    inspect scorable/verdict so an unscorable input is never mistaken for a
+    successful "human" result.
 */
 struct FeatureScore
 {
     std::string id;
-    double suspicion  = 0.0; // confidence-weighted mean over windows
+    double suspicion  = 0.0; // arithmetic mean over applicable DAAT windows
     double confidence = 0.0; // mean window confidence
-    double weight     = 0.0; // mean effective weight
+    double weight     = 0.0; // effective profile weight
     int    windows    = 0;
 };
 
@@ -37,9 +36,11 @@ struct GroupScoreView
 
 struct AnalysisOutcome
 {
-    double likelihood = 0.0; // the loss: 0 = "looks human", 1 = "looks synthetic"
-    double confidence = 0.0; // DAAT's evidence-quality confidence
-    std::vector<FeatureScore>  features;
+    double likelihood = 0.0; // 0 = "looks human", 1 = "looks synthetic"
+    double confidence = 0.0; // DAAT evidence-quality confidence
+    bool scorable     = false;
+    std::string verdict;
+    std::vector<FeatureScore> features;
     std::vector<GroupScoreView> groups;
     int numWindows = 0;
 };
@@ -50,14 +51,13 @@ public:
     Oracle();
     ~Oracle();
 
-    /** Full-file analysis at the buffer's native sample rate. */
     AnalysisOutcome analyze (const juce::AudioBuffer<float>& buffer,
                              double sampleRate);
 
-    /** Convenience: just the loss. */
     double score (const juce::AudioBuffer<float>& buffer, double sampleRate)
     {
-        return analyze (buffer, sampleRate).likelihood;
+        const auto outcome = analyze (buffer, sampleRate);
+        return outcome.scorable ? outcome.likelihood : 1.0;
     }
 
 private:
