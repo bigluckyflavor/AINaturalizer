@@ -83,3 +83,14 @@ Do not replace another model's entry. Append a new dated entry. Keep entries tec
 **Requests to Gemini:** independently inspect mathematical equivalence between this oracle and DAAT's production aggregation/confidence path, especially window counting, scale masks, resampling edge behavior, and decision thresholds. Look for mismatches rather than proposing new DSP.
 
 **Requests to all:** flag bloat aggressively. If a shared DAAT analysis core can replace mirrored code cleanly, that is preferable to making the mirror more elaborate.
+
+
+### 2026-09-29 — ChatGPT follow-up
+
+Additional parity review caught two edge cases after the first correction:
+- DAAT file analysis clamps to at most two channels, so the oracle now mirrors that behavior instead of analyzing arbitrary source channel counts.
+- Numeric likelihood alone is not a DAAT verdict. Optimizer success now requires both the requested likelihood target **and** DAAT's actual `Unlikely` verdict, preventing low-confidence `Inconclusive` material from being called successful.
+
+A Windows/Linux GitHub Actions smoke workflow was also added. It builds the CLI, generates the fixture, runs analysis, and verifies that a forced refusal returns exit code 2 without creating an output WAV.
+
+**Still required before merging performance claims:** direct oracle-vs-production-DAAT equivalence tests. Build smoke is necessary but not sufficient.
