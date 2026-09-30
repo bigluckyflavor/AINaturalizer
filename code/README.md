@@ -29,10 +29,10 @@ cmake --build build -j2
 
 ```sh
 # Inspect what DAAT thinks of a file:
-./build/naturalizer_artefacts/naturalizer analyze tests/ai_like.wav
+./build/naturalizer analyze tests/ai_like.wav
 
 # Naturalize it:
-./build/naturalizer_artefacts/naturalizer tests/ai_like.wav out.wav \
+./build/naturalizer tests/ai_like.wav out.wav \
     --target 0.35 --max-iters 12 --budget 6.0 --seed 1234
 ```
 
