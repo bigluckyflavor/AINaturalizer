@@ -13,18 +13,24 @@
 
     Each iteration tries every (operator, strength) pair on a scratch copy,
     measures the DAAT likelihood of each candidate, and applies the single
-    best move — provided it clears `minGain` and fits the remaining
-    perceptual budget. Stops at the target likelihood, at maxIters, or when
-    no safe move improves the score (the refusal rule: better to under-deliver
-    than to audibly damage the music).
+    best move only if it:
+      - fits the remaining dose budget,
+      - improves likelihood by at least minGain,
+      - does not worsen any other feature suspicion by more than
+        maxFeatureRegression, and
+      - does not introduce non-finite samples or new clipping.
+
+    The numeric dose budget is still an optimization heuristic, not a
+    calibrated perceptual metric.
 */
 struct OptimizeConfig
 {
-    double targetLikelihood = 0.35;
-    int    maxIters         = 12;
-    double budget           = 6.0;   // total perceptual dose (see PerturbOp)
-    double minGain          = 0.005; // minimum likelihood improvement to accept
-    uint64_t seed           = 1234;
+    double targetLikelihood      = 0.28;  // DAAT factory "Unlikely" boundary
+    int    maxIters              = 12;
+    double budget                = 6.0;   // heuristic total dose
+    double minGain               = 0.005;
+    double maxFeatureRegression  = 0.10;
+    uint64_t seed                = 1234;
     std::vector<double> strengths { 0.4, 0.7, 1.0 };
 };
 
@@ -49,9 +55,8 @@ struct OptimizeResult
     double confidenceAfter  = 0.0;
     double budgetUsed       = 0.0;
 
-    // How much the audio changed (vs the original input).
-    double peakDeltaDbFS = -200.0; // 20*log10(max|x - y|)
-    double rmsDeltaDbFS  = -200.0; // 20*log10(rms(x - y))
+    double peakDeltaDbFS = -200.0;
+    double rmsDeltaDbFS  = -200.0;
 
     std::vector<StepRecord> steps;
 };
@@ -61,7 +66,6 @@ class Optimizer
 public:
     Optimizer (Oracle& oracle, double sampleRate, OptimizeConfig config = {});
 
-    /** Runs the loop in place on `buffer`. Returns the full trace. */
     OptimizeResult run (juce::AudioBuffer<float>& buffer);
 
 private:
