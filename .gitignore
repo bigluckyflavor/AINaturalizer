@@ -1,0 +1,16 @@
+# Build outputs (JUCE fetch + compiled objects; regenerable via cmake)
+code/build/
+
+# Audio fixtures and outputs (regenerable via tests/make_fixture.py)
+*.wav
+*.mp3
+*.flac
+*.aiff
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
