@@ -95,7 +95,7 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
 
     for (int iter = 0; iter < config.maxIters; ++iter)
     {
-        if (targetReached (currentOutcome, config.targetLikelihood)
+        if (targetReached (currentOutcome, config.targetLikelihood))
         {
             result.reachedTarget = true;
             break;
@@ -181,7 +181,7 @@ OptimizeResult Optimizer::run (juce::AudioBuffer<float>& buffer)
         std::fflush (stdout);
     }
 
-    if (targetReached (currentOutcome, config.targetLikelihood)
+    if (targetReached (currentOutcome, config.targetLikelihood))
         result.reachedTarget = true;
     else if (! result.refused)
     {
